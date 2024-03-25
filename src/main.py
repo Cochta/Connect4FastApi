@@ -1,5 +1,7 @@
 import os
-from fastapi import FastAPI, Request
+from datetime import datetime
+
+from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from peewee import *
 
@@ -18,11 +20,15 @@ class PsqlModel(Model):
 
 
 class PlayerModel(PsqlModel):
+    id = AutoField(primary_key=True)
     name = CharField()
+    elo = IntegerField()
 
 
 class GameModel(PsqlModel):
-    name = CharField()
+    winnerId = BigIntegerField()
+    loserId = BigIntegerField()
+    timestamp = DateTimeField()
 
 
 with psql_db:  # connect
@@ -33,44 +39,77 @@ with psql_db:  # connect
 
 
 class Player(BaseModel):
+    id: int = PrimaryKeyField()
     name: str
+    elo: int
 
 
 class Game(BaseModel):
-    name: str
+    winnerId: int
+    loserId: int
+    timestamp: datetime
 
 
 @app.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "Successful connection to server"}
 
 
-@app.get("/hello/{name}")
-async def say_hello(name: str):
-    return {"message": f"Hello {name}"}
+@app.get("/SendMessage/{msg}")
+async def send_message(msg: str):
+    return {"message": f"{msg}"}
 
 
 @app.get("/players")
 async def get_players():
-    players = list(PlayerModel.select().dicts())
+    players = list(PlayerModel.select(PlayerModel.name, PlayerModel.elo).order_by(PlayerModel.elo.desc()).dicts())
     return players
+
+
+@app.get("/player/{name}")
+async def get_player_by_name(name: str):
+    player = list(PlayerModel.select(PlayerModel.name, PlayerModel.elo).where(PlayerModel.name == name).dicts())
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return player
 
 
 @app.get("/games")
 async def get_games():
-    return {"message": "Hello World"}
+    games = list(GameModel.select().dicts())
+    return games
 
 
-@app.post("/players")
+@app.get("/games/{player_name}")
+async def get_games_by_player_name(player_name: str):
+    try:
+        player = PlayerModel.get(PlayerModel.name == player_name)
+        games = list(
+            GameModel.select().where((GameModel.winnerId == player.id) | (GameModel.loserId == player.id)).dicts())
+        if not games:
+            raise HTTPException(status_code=404, detail="No games found for this player")
+        return games
+    except PlayerModel.DoesNotExist:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+
+@app.post("/player")
 async def create_player(player: Player):
-    new_player = PlayerModel.create(name=player.name)
-    return {"message": f"successfully created player : {new_player.name}"}
+    # Check if the player already exists
+    try:
+        existing_player = PlayerModel.get(PlayerModel.name == player.name)
+        # If player already exists, return a message indicating the same
+        return {"message": f"Player {existing_player.name} already exists."}
+    except PlayerModel.DoesNotExist:
+        # If player doesn't exist, create a new one
+        new_player = PlayerModel.create(name=player.name, elo=player.elo)
+        return {"message": f"Successfully created player: {new_player.name}"}
 
 
-@app.post("/games")
+@app.post("/game")
 async def create_game(game: Game):
-    print("post a new game : ", game)
-    return game
+    new_game = GameModel.create(winnerId=game.winnerId, loserId=game.loserId, timestamp=datetime.now())
+    return {"message": f"successfully created game between : {new_game.winnerId} and {new_game.loserId}"}
 
 
 @app.middleware("http")
