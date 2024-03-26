@@ -50,6 +50,10 @@ class Game(BaseModel):
     timestamp: datetime
 
 
+class EloChange(BaseModel):
+    elo: int
+
+
 @app.get("/")
 async def root():
     return {"message": "Successful connection to server"}
@@ -104,6 +108,17 @@ async def create_player(player: Player):
         # If player doesn't exist, create a new one
         new_player = PlayerModel.create(name=player.name, elo=player.elo)
         return {"message": f"Successfully created player: {new_player.name}"}
+
+
+@app.post("/player/{name}")
+async def update_player_elo(name: str, elo_change: EloChange):
+    try:
+        player = PlayerModel.get(PlayerModel.name == name)
+        player.elo += elo_change.elo
+        player.save()
+        return {"message": f"ELO for player {name} updated successfully"}
+    except PlayerModel.DoesNotExist:
+        raise HTTPException(status_code=404, detail=f"No player named: {name}")
 
 
 @app.post("/game")
